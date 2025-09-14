@@ -57,3 +57,85 @@ resource "azurerm_subnet" "subnet1" {
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = ["10.0.1.0/24"]
 }
+
+# Create a Network Security Group
+resource "azurerm_network_security_group" "nsg" {
+  name                = "learn-terraform-nsg"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+# Add a rule to allow SSH (port 22)
+resource "azurerm_network_security_rule" "ssh_rule" {
+  name                        = "SSH"
+  priority                    = 1001
+  direction                   = "Inbound"
+  access                      = "Allow"
+  protocol                    = "Tcp"
+  source_port_range           = "*"
+  destination_port_range      = "22"
+  source_address_prefix       = "*"
+  destination_address_prefix  = "*"
+  network_security_group_name = azurerm_network_security_group.nsg.name
+  resource_group_name         = azurerm_resource_group.rg.name
+}
+
+# Associate NSG with Subnet
+resource "azurerm_subnet_network_security_group_association" "subnet_assoc" {
+  subnet_id                 = azurerm_subnet.subnet1.id
+  network_security_group_id = azurerm_network_security_group.nsg.id
+}
+
+# Public IP for the VM
+resource "azurerm_public_ip" "vm_pip" {
+  name                = "learn-terraform-vm-ip"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  allocation_method   = "Static"
+  sku                 = "Standard"
+}
+
+# Network Interface
+resource "azurerm_network_interface" "vm_nic" {
+  name                = "learn-terraform-nic"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+
+  ip_configuration {
+    name                          = "internal"
+    subnet_id                     = azurerm_subnet.subnet1.id
+    private_ip_address_allocation = "Dynamic"
+    public_ip_address_id          = azurerm_public_ip.vm_pip.id
+  }
+}
+
+# Linux Virtual Machine
+resource "azurerm_linux_virtual_machine" "vm" {
+  name                = "learn-terraform-vm"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  size                = "Standard_B1s" # Small free-tier eligible size
+  admin_username      = "azureuser"
+
+  network_interface_ids = [
+    azurerm_network_interface.vm_nic.id,
+  ]
+
+  os_disk {
+    caching              = "ReadWrite"
+    storage_account_type = "Standard_LRS"
+  }
+
+  source_image_reference {
+    publisher = "Canonical"
+    offer     = "0001-com-ubuntu-server-focal"
+    sku       = "20_04-lts"
+    version   = "latest"
+  }
+
+  # Use SSH key instead of password (more secure)
+  admin_ssh_key {
+    username   = "azureuser"
+    public_key = file("/Users/subhaharini/.ssh/id_rsa.pub")
+  }
+}
